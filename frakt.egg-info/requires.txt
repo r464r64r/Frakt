@@ -1,0 +1,13 @@
+numpy>=1.24
+pandas>=2.0
+scipy>=1.11
+
+[backtesting]
+vectorbt>=0.26
+
+[dev]
+pytest>=7.0
+pytest-cov>=4.0
+
+[exchanges]
+ccxt>=4.0
