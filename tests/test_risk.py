@@ -2,8 +2,8 @@
 
 import pytest
 
-from risk.confidence import ConfidenceFactors
-from risk.position_sizing import (
+from frakt.risk.confidence import ConfidenceFactors
+from frakt.risk.position_sizing import (
     RiskParameters,
     calculate_position_size,
     calculate_position_value,

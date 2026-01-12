@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from core.market_structure import (
+from frakt.core.market_structure import (
     detect_structure_breaks,
     determine_trend,
     find_recent_swing_level,

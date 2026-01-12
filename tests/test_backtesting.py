@@ -12,8 +12,8 @@ import pytest
 # Skip all tests if vectorbt is not available
 pytest.importorskip("vectorbt", reason="vectorbt only available in Docker container")
 
-from backtesting.runner import BacktestResult, BacktestRunner
-from strategies.base import BaseStrategy, Signal
+from frakt.backtesting.runner import BacktestResult, BacktestRunner
+from frakt.strategies.base import BaseStrategy, Signal
 
 
 # Mock strategy for testing

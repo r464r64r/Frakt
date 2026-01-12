@@ -8,10 +8,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from strategies.base import Signal
-from strategies.bos_orderblock import BOSOrderBlockStrategy
-from strategies.fvg_fill import FVGFillStrategy
-from strategies.liquidity_sweep import LiquiditySweepStrategy
+from frakt.strategies.base import Signal
+from frakt.strategies.bos_orderblock import BOSOrderBlockStrategy
+from frakt.strategies.fvg_fill import FVGFillStrategy
+from frakt.strategies.liquidity_sweep import LiquiditySweepStrategy
 
 
 @pytest.fixture

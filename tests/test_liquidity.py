@@ -3,13 +3,13 @@
 import numpy as np
 import pandas as pd
 
-from core.liquidity import (
+from frakt.core.liquidity import (
     detect_liquidity_sweep,
     find_equal_levels,
     find_liquidity_zones,
     get_nearest_liquidity,
 )
-from core.market_structure import find_swing_points
+from frakt.core.market_structure import find_swing_points
 
 # Import fixtures
 

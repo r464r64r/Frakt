@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch
 
-from exchanges.hyperliquid import HyperliquidExchange
+from frakt.exchanges.hyperliquid import HyperliquidExchange
 
 
 class TestHyperliquidExchange:
@@ -11,7 +11,7 @@ class TestHyperliquidExchange:
 
     def test_init_testnet(self):
         """Test initialization with testnet."""
-        with patch("exchanges.hyperliquid.Info"), patch("exchanges.hyperliquid.Exchange"):
+        with patch("frakt.exchanges.hyperliquid.Info"), patch("frakt.exchanges.hyperliquid.Exchange"):
             exchange = HyperliquidExchange(
                 private_key="0x" + "1" * 64, network="testnet"
             )
@@ -20,7 +20,7 @@ class TestHyperliquidExchange:
 
     def test_init_mainnet(self):
         """Test initialization with mainnet."""
-        with patch("exchanges.hyperliquid.Info"), patch("exchanges.hyperliquid.Exchange"):
+        with patch("frakt.exchanges.hyperliquid.Info"), patch("frakt.exchanges.hyperliquid.Exchange"):
             exchange = HyperliquidExchange(
                 private_key="0x" + "1" * 64, network="mainnet"
             )
@@ -35,7 +35,7 @@ class TestHyperliquidExchange:
 
     def test_place_order_validation(self):
         """Test order placement validation."""
-        with patch("exchanges.hyperliquid.Info"), patch("exchanges.hyperliquid.Exchange"):
+        with patch("frakt.exchanges.hyperliquid.Info"), patch("frakt.exchanges.hyperliquid.Exchange"):
             exchange = HyperliquidExchange(
                 private_key="0x" + "1" * 64, network="testnet"
             )
@@ -58,8 +58,8 @@ class TestHyperliquidExchange:
 
     def test_get_ticker_mock(self):
         """Test ticker retrieval (mocked)."""
-        with patch("exchanges.hyperliquid.Info") as mock_info, patch(
-            "exchanges.hyperliquid.Exchange"
+        with patch("frakt.exchanges.hyperliquid.Info") as mock_info, patch(
+            "frakt.exchanges.hyperliquid.Exchange"
         ):
             # Mock all_mids response
             mock_info_instance = Mock()
@@ -76,8 +76,8 @@ class TestHyperliquidExchange:
 
     def test_get_position_mock(self):
         """Test position retrieval (mocked)."""
-        with patch("exchanges.hyperliquid.Info") as mock_info, patch(
-            "exchanges.hyperliquid.Exchange"
+        with patch("frakt.exchanges.hyperliquid.Info") as mock_info, patch(
+            "frakt.exchanges.hyperliquid.Exchange"
         ):
             # Mock user_state response
             mock_info_instance = Mock()
@@ -108,8 +108,8 @@ class TestHyperliquidExchange:
 
     def test_no_position_returns_none(self):
         """Test get_position returns None when no position exists."""
-        with patch("exchanges.hyperliquid.Info") as mock_info, patch(
-            "exchanges.hyperliquid.Exchange"
+        with patch("frakt.exchanges.hyperliquid.Info") as mock_info, patch(
+            "frakt.exchanges.hyperliquid.Exchange"
         ):
             # Mock empty positions
             mock_info_instance = Mock()

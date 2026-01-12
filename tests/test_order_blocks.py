@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from core.order_blocks import (
+from frakt.core.order_blocks import (
     calculate_ob_strength,
     check_ob_retest,
     find_order_blocks,

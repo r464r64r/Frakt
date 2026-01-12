@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from core.imbalance import calculate_fvg_size, check_fvg_fill, find_fair_value_gaps, get_active_fvgs
+from frakt.core.imbalance import calculate_fvg_size, check_fvg_fill, find_fair_value_gaps, get_active_fvgs
 
 
 @pytest.fixture
