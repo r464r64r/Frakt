@@ -9,6 +9,6 @@ Frakt provides wrappers for common exchanges, but does NOT include:
 These belong in your application layer (e.g., FraktAl).
 """
 
-from exchanges.hyperliquid import HyperliquidExchange
+from frakt.exchanges.hyperliquid import HyperliquidExchange
 
 __all__ = ["HyperliquidExchange"]
