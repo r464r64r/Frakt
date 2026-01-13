@@ -28,7 +28,10 @@ if signal and signal.confidence > 0.8:
 ## Installation
 
 ```bash
-# Install from source
+# Install from GitHub (recommended for production)
+pip install git+https://github.com/r464r64r/Frakt.git@main
+
+# Or install from source (for development)
 git clone https://github.com/r464r64r/Frakt.git
 cd Frakt
 pip install -e .
