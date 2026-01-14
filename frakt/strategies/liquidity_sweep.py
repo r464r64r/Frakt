@@ -43,6 +43,7 @@ class LiquiditySweepStrategy(BaseStrategy):
         "min_rr_ratio": 1.5,  # Minimum risk:reward
         "tolerance": 0.001,  # Tolerance for equal level detection
         "atr_period": 14,  # ATR period for volatility
+        "signal_lookback_candles": 5,  # Only return signals from last N candles (forward-looking)
     }
 
     def __init__(self, params: dict | None = None):
@@ -113,9 +114,30 @@ class LiquiditySweepStrategy(BaseStrategy):
         # 6. Filter by RR ratio
         signals = self.filter_signals_by_rr(signals, self.params["min_rr_ratio"])
 
+        # 7. Filter by recency (forward-looking: only return FRESH signals)
+        if signals:
+            total_signals = len(signals)
+            lookback = self.params["signal_lookback_candles"]
+
+            # Calculate cutoff timestamp (N candles ago from latest data)
+            if len(data) >= lookback:
+                cutoff_idx = -lookback
+                cutoff_time = data.index[cutoff_idx]
+
+                # Keep only signals from last N candles
+                recent_signals = [s for s in signals if s.timestamp >= cutoff_time]
+
+                if recent_signals != signals:
+                    logger.info(
+                        f"Filtered {total_signals} historical signals → "
+                        f"{len(recent_signals)} RECENT (last {lookback} candles)"
+                    )
+
+                signals = recent_signals
+
         if signals:
             logger.info(
-                f"Found {len(signals)} liquidity sweep signal(s): "
+                f"Found {len(signals)} FRESH liquidity sweep signal(s): "
                 f"{sum(1 for s in signals if s.direction == 1)} LONG, "
                 f"{sum(1 for s in signals if s.direction == -1)} SHORT"
             )
@@ -126,7 +148,7 @@ class LiquiditySweepStrategy(BaseStrategy):
                     f"TP: {signal.take_profit:.2f}"
                 )
         else:
-            logger.debug("No liquidity sweep signals found")
+            logger.debug("No fresh liquidity sweep signals found")
 
         return signals
 
