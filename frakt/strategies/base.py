@@ -105,7 +105,7 @@ class BaseStrategy(ABC):
     @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> list[Signal]:
         """
-        Generate trading signals from OHLCV data.
+        Generate trading signals from OHLCV data (single timeframe).
 
         Args:
             data: DataFrame with columns [open, high, low, close, volume]
@@ -115,6 +115,34 @@ class BaseStrategy(ABC):
             List of Signal objects
         """
         pass
+
+    def generate_signals_multi_tf(
+        self,
+        htf_data: pd.DataFrame,
+        mtf_data: pd.DataFrame,
+        ltf_data: pd.DataFrame
+    ) -> list[Signal]:
+        """
+        Generate trading signals using multi-timeframe analysis (ADR 0.04.0014).
+
+        This is the preferred method for signal generation per the Manifesto:
+        - HTF (H4): Determine trend direction (only trade WITH trend)
+        - MTF (H1): Confirm structure (BOS/CHoCH)
+        - LTF (M15): Find precise entry (liquidity sweeps)
+
+        Default implementation falls back to single-TF using LTF data.
+        Subclasses should override for proper multi-TF logic.
+
+        Args:
+            htf_data: Higher timeframe data (e.g., H4) for trend
+            mtf_data: Medium timeframe data (e.g., H1) for structure
+            ltf_data: Lower timeframe data (e.g., M15) for entry
+
+        Returns:
+            List of Signal objects with multi-TF confidence adjustments
+        """
+        # Default: fall back to single-TF using LTF
+        return self.generate_signals(ltf_data)
 
     @abstractmethod
     def calculate_confidence(self, data: pd.DataFrame, signal_idx: int) -> int:

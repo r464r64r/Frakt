@@ -29,6 +29,11 @@ class LiquiditySweepStrategy(BaseStrategy):
     4. Stop loss: Beyond the sweep wick
     5. Take profit: Previous structure level or 2:1 RR
 
+    Multi-Timeframe Mode (ADR 0.04.0014):
+    - HTF (H4): Determine trend direction (only trade WITH trend)
+    - MTF (H1): Confirm structure (BOS/CHoCH)
+    - LTF (M15): Find precise entry (liquidity sweeps)
+
     Example:
         >>> strategy = LiquiditySweepStrategy({'swing_period': 5})
         >>> signals = strategy.generate_signals(btc_data)
@@ -44,6 +49,9 @@ class LiquiditySweepStrategy(BaseStrategy):
         "tolerance": 0.001,  # Tolerance for equal level detection
         "atr_period": 14,  # ATR period for volatility
         "signal_lookback_candles": 5,  # Only return signals from last N candles (forward-looking)
+        # Multi-TF confidence bonuses (ADR 0.04.0014)
+        "htf_trend_bonus": 20,  # Bonus for HTF trend alignment
+        "mtf_structure_bonus": 10,  # Bonus for MTF structure confirmation
     }
 
     def __init__(self, params: dict | None = None):
@@ -151,6 +159,166 @@ class LiquiditySweepStrategy(BaseStrategy):
             logger.debug("No fresh liquidity sweep signals found")
 
         return signals
+
+    def generate_signals_multi_tf(
+        self,
+        htf_data: pd.DataFrame,
+        mtf_data: pd.DataFrame,
+        ltf_data: pd.DataFrame
+    ) -> list[Signal]:
+        """
+        Generate signals using multi-timeframe analysis (ADR 0.04.0014).
+
+        Flow per Manifesto Chapter 5:
+        1. HTF (H4): Determine trend direction → only trade WITH trend
+        2. MTF (H1): Confirm structure (recent BOS in trend direction)
+        3. LTF (M15): Find liquidity sweeps for precise entry
+
+        Args:
+            htf_data: H4 data for trend analysis
+            mtf_data: H1 data for structure confirmation
+            ltf_data: M15 data for entry signals
+
+        Returns:
+            List of signals filtered by HTF trend with confidence adjustments
+        """
+        # 1. Determine HTF trend
+        htf_trend = self._determine_htf_trend(htf_data)
+        logger.info(f"HTF Trend: {'BULLISH' if htf_trend == 1 else 'BEARISH' if htf_trend == -1 else 'RANGING'}")
+
+        # 2. Check MTF structure
+        mtf_has_bos = self._check_mtf_structure(mtf_data, htf_trend)
+        logger.debug(f"MTF Structure confirmed: {mtf_has_bos}")
+
+        # 3. Generate LTF signals (using existing single-TF method)
+        ltf_signals = self.generate_signals(ltf_data)
+
+        if not ltf_signals:
+            return []
+
+        # 4. Filter and adjust signals based on multi-TF context
+        filtered_signals = []
+        for signal in ltf_signals:
+            # Skip signals against HTF trend (unless ranging)
+            if htf_trend != 0:  # Not ranging
+                if htf_trend == 1 and signal.direction == -1:
+                    logger.debug(f"Skipping SHORT signal (HTF is BULLISH)")
+                    continue
+                if htf_trend == -1 and signal.direction == 1:
+                    logger.debug(f"Skipping LONG signal (HTF is BEARISH)")
+                    continue
+
+            # Adjust confidence based on multi-TF alignment
+            confidence_bonus = 0
+
+            # HTF trend alignment bonus
+            if htf_trend != 0 and htf_trend == signal.direction:
+                confidence_bonus += self.params["htf_trend_bonus"]
+                signal.metadata["htf_aligned"] = True
+
+            # MTF structure bonus
+            if mtf_has_bos:
+                confidence_bonus += self.params["mtf_structure_bonus"]
+                signal.metadata["mtf_confirmed"] = True
+
+            # Apply bonus (cap at 100)
+            new_confidence = min(100, signal.confidence + confidence_bonus)
+
+            # Create new signal with updated confidence
+            adjusted_signal = Signal(
+                timestamp=signal.timestamp,
+                direction=signal.direction,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                confidence=new_confidence,
+                strategy_name=signal.strategy_name,
+                metadata={
+                    **signal.metadata,
+                    "htf_trend": htf_trend,
+                    "mtf_bos": mtf_has_bos,
+                    "original_confidence": signal.confidence,
+                    "multi_tf": True,
+                },
+            )
+            filtered_signals.append(adjusted_signal)
+
+        if filtered_signals:
+            logger.info(
+                f"Multi-TF signals: {len(filtered_signals)} "
+                f"(filtered from {len(ltf_signals)} LTF signals, "
+                f"HTF={'BULL' if htf_trend == 1 else 'BEAR' if htf_trend == -1 else 'RANGE'})"
+            )
+
+        return filtered_signals
+
+    def _determine_htf_trend(self, htf_data: pd.DataFrame) -> int:
+        """
+        Determine overall trend from HTF (H4) data.
+
+        Returns:
+            1 = bullish, -1 = bearish, 0 = ranging
+        """
+        if len(htf_data) < 20:
+            return 0  # Not enough data
+
+        # Find swing points on HTF
+        swing_highs, swing_lows = find_swing_points(
+            htf_data["high"], htf_data["low"], n=self.params["swing_period"]
+        )
+
+        # Use market structure to determine trend
+        trend = determine_trend(swing_highs, swing_lows)
+
+        if len(trend) == 0:
+            return 0
+
+        # Get recent trend (last 5 candles average)
+        recent_trend = trend.iloc[-5:].mean() if len(trend) >= 5 else trend.mean()
+
+        if recent_trend > 0.3:
+            return 1  # Bullish
+        elif recent_trend < -0.3:
+            return -1  # Bearish
+        else:
+            return 0  # Ranging
+
+    def _check_mtf_structure(self, mtf_data: pd.DataFrame, expected_direction: int) -> bool:
+        """
+        Check if MTF (H1) has recent BOS in expected direction.
+
+        Args:
+            mtf_data: H1 OHLCV data
+            expected_direction: 1 for bullish BOS, -1 for bearish BOS
+
+        Returns:
+            True if structure confirms the expected direction
+        """
+        if len(mtf_data) < 20 or expected_direction == 0:
+            return False
+
+        # Find swing points on MTF
+        swing_highs, swing_lows = find_swing_points(
+            mtf_data["high"], mtf_data["low"], n=self.params["swing_period"]
+        )
+
+        # Check for recent BOS in expected direction
+        # Bullish BOS: New swing high above previous swing high
+        # Bearish BOS: New swing low below previous swing low
+        recent_highs = swing_highs.dropna().tail(3)
+        recent_lows = swing_lows.dropna().tail(3)
+
+        if expected_direction == 1 and len(recent_highs) >= 2:
+            # Check if latest high is above previous high (bullish BOS)
+            if recent_highs.iloc[-1] > recent_highs.iloc[-2]:
+                return True
+
+        if expected_direction == -1 and len(recent_lows) >= 2:
+            # Check if latest low is below previous low (bearish BOS)
+            if recent_lows.iloc[-1] < recent_lows.iloc[-2]:
+                return True
+
+        return False
 
     def _combine_liquidity_levels(
         self, swing_levels: pd.Series, equal_levels: pd.Series
