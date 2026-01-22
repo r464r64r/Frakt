@@ -153,8 +153,21 @@ def detect_liquidity_sweep(
     # Convert to list for iteration
     index_list = list(high.index)
 
+    # ========== FIX #31: Check ALL levels per bar (not break after first) ==========
+    # BEFORE: Outer loop over levels, break after first sweep → misses multi-level sweeps
+    # AFTER: Track which levels have been swept, check all levels for each bar
+    #
+    # A single aggressive candle can sweep multiple levels - this is a STRONGER signal!
+
+    # Track which levels have already been swept (don't count same level twice)
+    swept_levels: set = set()
+
     # For each liquidity level, look for sweeps
     for level_idx, level_price in valid_levels.items():
+        # Skip if this level was already swept
+        if level_idx in swept_levels:
+            continue
+
         level_pos = index_list.index(level_idx)
 
         # Look at bars after the level was established
@@ -162,7 +175,6 @@ def detect_liquidity_sweep(
             idx = index_list[i]
             current_high = high.iloc[i]
             current_low = low.iloc[i]
-            current_close = close.iloc[i]
 
             # Check for bullish sweep (break below, then close above)
             if direction in ("bullish", "both") and current_low < level_price:
@@ -174,9 +186,12 @@ def detect_liquidity_sweep(
                     if reversal_close > level_price:
                         # Reversal complete
                         sweeps.loc[reversal_idx] = True
+                        swept_levels.add(level_idx)  # Mark level as swept
                         break
-                # After finding a sweep attempt, move past this level
-                break
+                # FIX #31: Don't break here - continue checking other bars
+                # But DO mark this level as processed to avoid duplicate detection
+                if level_idx in swept_levels:
+                    break  # This level is done, move to next level
 
             # Check for bearish sweep (break above, then close below)
             if direction in ("bearish", "both") and current_high > level_price:
@@ -188,9 +203,11 @@ def detect_liquidity_sweep(
                     if reversal_close < level_price:
                         # Reversal complete
                         sweeps.loc[reversal_idx] = True
+                        swept_levels.add(level_idx)  # Mark level as swept
                         break
-                # After finding a sweep attempt, move past this level
-                break
+                # FIX #31: Same - only break if we found the sweep
+                if level_idx in swept_levels:
+                    break
 
     return sweeps
 

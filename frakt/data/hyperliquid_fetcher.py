@@ -241,11 +241,18 @@ class HyperliquidFetcher(BaseFetcher):
         """
         Convert Hyperliquid candles to standard DataFrame format.
 
+        ========== FIX #36: Filter out incomplete candles ==========
+        Candles where close time (T) is in the future are still forming.
+        Trading on incomplete candles causes:
+        - False signals that disappear on candle close
+        - Backtest vs live mismatch
+        - Volatility artifacts
+
         Args:
             candles: List of candle dicts from Hyperliquid API
 
         Returns:
-            DataFrame with standard format
+            DataFrame with standard format (only COMPLETE candles)
         """
         if not candles:
             return self._empty_dataframe()
@@ -253,7 +260,7 @@ class HyperliquidFetcher(BaseFetcher):
         # Hyperliquid candle format:
         # [
         #   {
-        #     't': 1638316800000,  # timestamp (ms)
+        #     't': 1638316800000,  # timestamp (ms) - open time
         #     'T': 1638320399999,  # close time
         #     'o': '57000.0',      # open
         #     'h': '57100.0',      # high
@@ -265,8 +272,20 @@ class HyperliquidFetcher(BaseFetcher):
         #   ...
         # ]
 
+        # ========== FIX #36: Filter incomplete candles ==========
+        current_time_ms = int(time.time() * 1000)
+        complete_candles = [c for c in candles if c.get('T', 0) <= current_time_ms]
+
+        if len(complete_candles) < len(candles):
+            logger.debug(
+                f"Filtered {len(candles) - len(complete_candles)} incomplete candle(s)"
+            )
+
+        if not complete_candles:
+            return self._empty_dataframe()
+
         data = []
-        for candle in candles:
+        for candle in complete_candles:
             data.append(
                 {
                     "timestamp": candle["t"],

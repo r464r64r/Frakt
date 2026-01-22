@@ -517,13 +517,26 @@ class LiquiditySweepStrategy(BaseStrategy):
             # Clean sweep = immediate reversal
             score += 20  # Base points for detected pattern
 
-            # Bonus for strong reversal candle
+            # ========== FIX #27: Reward SMALL body/wick ratio (not large) ==========
+            # BEFORE: body/wick > 0.5 = good (WRONG for sweeps!)
+            # AFTER: body/wick < 0.3 = good (sweep = long wick, small body = rejection)
+            #
+            # Good liquidity sweep candle:
+            #    |  <- long wick (swept liquidity)
+            #   [ ] <- small body (strong rejection)
+            #    |
+            # Bad candle for sweep:
+            #   [====] <- large body (momentum, no rejection)
             current_bar = data.iloc[signal_idx]
             body_size = abs(current_bar["close"] - current_bar["open"])
             wick_size = current_bar["high"] - current_bar["low"]
 
-            if wick_size > 0 and body_size / wick_size > 0.5:
-                score += 10  # Strong reversal candle
+            if wick_size > 0:
+                body_wick_ratio = body_size / wick_size
+                if body_wick_ratio < 0.3:
+                    score += 10  # Strong wick rejection (ideal sweep)
+                elif body_wick_ratio < 0.5:
+                    score += 5   # Moderate rejection
 
         except Exception:
             return 50  # Default on error
