@@ -95,7 +95,11 @@ class BacktestRunner:
         risk_params: RiskParameters | None = None,
     ) -> BacktestResult:
         """
-        Run backtest for a strategy.
+        Run backtest for a strategy using bar-by-bar simulation.
+
+        IMPORTANT: This method simulates realistic trading by only allowing
+        the strategy to see historical data up to each bar. This prevents
+        look-ahead bias where future data leaks into past decisions.
 
         Args:
             data: OHLCV DataFrame with DatetimeIndex
@@ -112,14 +116,31 @@ class BacktestRunner:
         """
         risk_params = risk_params or RiskParameters()
 
-        # Generate signals
-        signals = strategy.generate_signals(data)
+        # Bar-by-bar simulation to prevent look-ahead bias
+        # Start from a minimum number of bars required for indicators
+        min_bars = 100  # Enough for most indicators (SMA, ATR, etc.)
+        all_signals = []
 
-        if not signals:
+        for i in range(min_bars, len(data)):
+            # Only pass historical data up to current bar
+            historical_data = data.iloc[: i + 1]
+
+            # Generate signals based on historical data only
+            signals = strategy.generate_signals(historical_data)
+
+            # Only keep signals generated at the current bar
+            # (strategies might regenerate old signals)
+            current_bar_signals = [
+                s for s in signals if s.timestamp == historical_data.index[-1]
+            ]
+
+            all_signals.extend(current_bar_signals)
+
+        if not all_signals:
             return self._empty_result(data.index)
 
         # Convert to vectorbt format
-        entries, exits = self._signals_to_arrays(data, signals)
+        entries, exits = self._signals_to_arrays(data, all_signals)
 
         # Run vectorbt backtest
         portfolio = vbt.Portfolio.from_signals(
@@ -132,7 +153,7 @@ class BacktestRunner:
             freq="1h",  # Adjust based on data timeframe
         )
 
-        return self._extract_results(portfolio, signals, data.index)
+        return self._extract_results(portfolio, all_signals, data.index)
 
     def optimize(
         self,
