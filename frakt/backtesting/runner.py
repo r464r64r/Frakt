@@ -142,11 +142,29 @@ class BacktestRunner:
         # Convert to vectorbt format
         entries, exits = self._signals_to_arrays(data, all_signals)
 
-        # Run vectorbt backtest
+        # Extract SL/TP from signals for vectorbt
+        # Use signal's actual SL/TP prices
+        sl_stops = pd.Series(index=data.index, dtype=float)
+        tp_stops = pd.Series(index=data.index, dtype=float)
+
+        for signal in all_signals:
+            if signal.timestamp in data.index:
+                # Calculate SL/TP as % from entry
+                entry = signal.entry_price
+                sl_pct = abs(signal.stop_loss - entry) / entry
+                tp_pct = abs(signal.take_profit - entry) / entry if signal.take_profit else None
+
+                sl_stops.loc[signal.timestamp] = sl_pct
+                if tp_pct:
+                    tp_stops.loc[signal.timestamp] = tp_pct
+
+        # Run vectorbt backtest with SL/TP
         portfolio = vbt.Portfolio.from_signals(
             close=data["close"],
             entries=entries,
             exits=exits,
+            sl_stop=sl_stops,  # Stop loss as % from entry
+            tp_stop=tp_stops,  # Take profit as % from entry
             init_cash=self.initial_cash,
             fees=self.fees,
             slippage=self.slippage,
