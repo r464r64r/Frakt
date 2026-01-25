@@ -43,11 +43,11 @@ class LiquiditySweepStrategy(BaseStrategy):
 
     DEFAULT_PARAMS = {
         "swing_period": 5,  # Bars for swing detection
-        "min_sweep_percent": 0.001,  # Minimum sweep beyond level (0.1%)
         "max_reversal_bars": 3,  # Must reverse within N bars
         "min_rr_ratio": 1.5,  # Minimum risk:reward
         "tolerance": 0.001,  # Tolerance for equal level detection
         "atr_period": 14,  # ATR period for volatility
+        "atr_stop_buffer": 0.5,  # ATR multiplier for stop loss buffer
         "signal_lookback_candles": 5,  # Only return signals from last N candles (forward-looking)
         # Multi-TF confidence bonuses (ADR 0.04.0014)
         "htf_trend_bonus": 20,  # Bonus for HTF trend alignment
@@ -70,6 +70,10 @@ class LiquiditySweepStrategy(BaseStrategy):
             List of Signal objects for valid setups
         """
         self.validate_data(data)
+
+        # Ensure data is chronologically sorted (required for recency filtering)
+        assert data.index.is_monotonic_increasing, "Data must be chronologically sorted"
+
         logger.debug(f"Analyzing {len(data)} candles for liquidity sweeps")
         signals: list[Signal] = []
 
@@ -354,30 +358,53 @@ class LiquiditySweepStrategy(BaseStrategy):
         try:
             entry = data.loc[idx, "close"]
 
-            # Stop loss: Below the sweep low (the wick)
+            # Calculate ATR for dynamic stop loss buffer
+            iloc_idx = data.index.get_loc(idx)
+            lookback = min(50, iloc_idx)
+            recent_data = data.iloc[max(0, iloc_idx - lookback) : iloc_idx + 1]
+
+            atr = self._calculate_atr(recent_data, self.params["atr_period"])
+            atr_values = atr.dropna()
+
+            if len(atr_values) == 0:
+                logger.warning(f"ATR calculation failed at {idx} - using default 0.1% buffer")
+                atr_buffer = entry * 0.001  # Fallback to 0.1%
+            else:
+                current_atr = atr_values.iloc[-1]
+                atr_buffer = current_atr * self.params["atr_stop_buffer"]
+
+            # Stop loss: Below the sweep low (the wick) with ATR buffer
             sweep_low = data.loc[idx, "low"]
-            stop_loss = sweep_low * 0.999  # Small buffer
+            stop_loss = sweep_low - atr_buffer
 
             # Validate stop makes sense
             if stop_loss >= entry:
                 return None
 
-            # Take profit: Previous swing high or 2:1 RR
+            # Take profit: Previous swing high or min RR (validate RR before creating signal)
+            risk = entry - stop_loss
             prior_highs = swing_highs[swing_highs.index < idx].dropna()
+
             if len(prior_highs) > 0:
-                take_profit = prior_highs.iloc[-1]
-                # Ensure TP is above entry
-                if take_profit <= entry:
-                    # Use 2:1 RR instead
-                    risk = entry - stop_loss
-                    take_profit = entry + (risk * 2)
+                candidate_tp = prior_highs.iloc[-1]
+
+                # Validate RR before using swing high as TP
+                if candidate_tp > entry:
+                    potential_rr = (candidate_tp - entry) / risk
+
+                    if potential_rr >= self.params["min_rr_ratio"]:
+                        take_profit = candidate_tp
+                    else:
+                        # Swing TP doesn't meet min RR - extend to minimum
+                        take_profit = entry + (risk * self.params["min_rr_ratio"])
+                else:
+                    # Swing high below entry - use min RR instead
+                    take_profit = entry + (risk * self.params["min_rr_ratio"])
             else:
-                # Use 2:1 RR
-                risk = entry - stop_loss
-                take_profit = entry + (risk * 2)
+                # No prior swing highs - use min RR
+                take_profit = entry + (risk * self.params["min_rr_ratio"])
 
             # Calculate confidence
-            iloc_idx = data.index.get_loc(idx)
             confidence = self.calculate_confidence(data, iloc_idx)
 
             return Signal(
@@ -390,7 +417,8 @@ class LiquiditySweepStrategy(BaseStrategy):
                 strategy_name=self.name,
                 metadata={"sweep_low": sweep_low, "signal_type": "bullish_sweep"},
             )
-        except Exception:
+        except (KeyError, IndexError, ValueError) as e:
+            logger.warning(f"Long signal creation failed at {idx}: {e}")
             return None
 
     def _create_short_signal(
@@ -411,30 +439,53 @@ class LiquiditySweepStrategy(BaseStrategy):
         try:
             entry = data.loc[idx, "close"]
 
-            # Stop loss: Above the sweep high (the wick)
+            # Calculate ATR for dynamic stop loss buffer
+            iloc_idx = data.index.get_loc(idx)
+            lookback = min(50, iloc_idx)
+            recent_data = data.iloc[max(0, iloc_idx - lookback) : iloc_idx + 1]
+
+            atr = self._calculate_atr(recent_data, self.params["atr_period"])
+            atr_values = atr.dropna()
+
+            if len(atr_values) == 0:
+                logger.warning(f"ATR calculation failed at {idx} - using default 0.1% buffer")
+                atr_buffer = entry * 0.001  # Fallback to 0.1%
+            else:
+                current_atr = atr_values.iloc[-1]
+                atr_buffer = current_atr * self.params["atr_stop_buffer"]
+
+            # Stop loss: Above the sweep high (the wick) with ATR buffer
             sweep_high = data.loc[idx, "high"]
-            stop_loss = sweep_high * 1.001  # Small buffer
+            stop_loss = sweep_high + atr_buffer
 
             # Validate stop makes sense
             if stop_loss <= entry:
                 return None
 
-            # Take profit: Previous swing low or 2:1 RR
+            # Take profit: Previous swing low or min RR (validate RR before creating signal)
+            risk = stop_loss - entry
             prior_lows = swing_lows[swing_lows.index < idx].dropna()
+
             if len(prior_lows) > 0:
-                take_profit = prior_lows.iloc[-1]
-                # Ensure TP is below entry
-                if take_profit >= entry:
-                    # Use 2:1 RR instead
-                    risk = stop_loss - entry
-                    take_profit = entry - (risk * 2)
+                candidate_tp = prior_lows.iloc[-1]
+
+                # Validate RR before using swing low as TP
+                if candidate_tp < entry:
+                    potential_rr = (entry - candidate_tp) / risk
+
+                    if potential_rr >= self.params["min_rr_ratio"]:
+                        take_profit = candidate_tp
+                    else:
+                        # Swing TP doesn't meet min RR - extend to minimum
+                        take_profit = entry - (risk * self.params["min_rr_ratio"])
+                else:
+                    # Swing low above entry - use min RR instead
+                    take_profit = entry - (risk * self.params["min_rr_ratio"])
             else:
-                # Use 2:1 RR
-                risk = stop_loss - entry
-                take_profit = entry - (risk * 2)
+                # No prior swing lows - use min RR
+                take_profit = entry - (risk * self.params["min_rr_ratio"])
 
             # Calculate confidence
-            iloc_idx = data.index.get_loc(idx)
             confidence = self.calculate_confidence(data, iloc_idx)
 
             return Signal(
@@ -447,7 +498,8 @@ class LiquiditySweepStrategy(BaseStrategy):
                 strategy_name=self.name,
                 metadata={"sweep_high": sweep_high, "signal_type": "bearish_sweep"},
             )
-        except Exception:
+        except (KeyError, IndexError, ValueError) as e:
+            logger.warning(f"Short signal creation failed at {idx}: {e}")
             return None
 
     def calculate_confidence(self, data: pd.DataFrame, signal_idx: int) -> int:
@@ -477,6 +529,10 @@ class LiquiditySweepStrategy(BaseStrategy):
             if len(recent_data) < 10:
                 return 50  # Default confidence for insufficient data
 
+            # Determine signal direction from OHLC
+            signal_bar = data.iloc[signal_idx]
+            signal_direction = 1 if signal_bar["close"] > signal_bar["open"] else -1
+
             # 1. Trend alignment (0-30 points)
             swing_h, swing_l = find_swing_points(
                 recent_data["high"], recent_data["low"], n=min(5, len(recent_data) // 4)
@@ -485,33 +541,44 @@ class LiquiditySweepStrategy(BaseStrategy):
 
             if len(trend) > 0:
                 current_trend = trend.iloc[-1]
-                # For now, any clear trend adds points
-                if current_trend != 0:
+                # Only reward if trend aligns with signal direction
+                if current_trend != 0 and current_trend == signal_direction:
                     score += 15
-                # Strong trend (consistent)
-                trend_consistency = (trend == current_trend).mean()
-                if trend_consistency > 0.7:
-                    score += 15
+                    # Strong trend (consistent)
+                    trend_consistency = (trend == current_trend).mean()
+                    if trend_consistency > 0.7:
+                        score += 15
 
-            # 2. Volume confirmation (0-20 points)
-            avg_volume = recent_data["volume"].mean()
-            current_volume = data.iloc[signal_idx]["volume"]
+            # 2. Volume confirmation (0-20 points) - with defensive checks
+            if "volume" in recent_data.columns and not recent_data["volume"].isna().all():
+                avg_volume = recent_data["volume"].mean()
+                current_volume = data.iloc[signal_idx]["volume"]
 
-            if current_volume > avg_volume * 1.5:
-                score += 20  # Volume spike confirms
-            elif current_volume > avg_volume:
-                score += 10  # Above average
+                if pd.notna(avg_volume) and pd.notna(current_volume) and avg_volume > 0:
+                    if current_volume > avg_volume * 1.5:
+                        score += 20  # Volume spike confirms
+                    elif current_volume > avg_volume:
+                        score += 10  # Above average
+            else:
+                logger.debug("Volume data missing or invalid - skipping volume scoring")
 
-            # 3. Volatility regime (0-20 points)
+            # 3. Volatility regime (0-20 points) - stability-based scoring
             atr = self._calculate_atr(recent_data, self.params["atr_period"])
-            if len(atr.dropna()) > 0:
-                current_atr = atr.iloc[-1]
-                avg_atr = atr.mean()
+            atr_values = atr.dropna()
 
-                if current_atr < avg_atr * 1.5:
-                    score += 20  # Low volatility = cleaner signals
-                elif current_atr < avg_atr * 2:
-                    score += 10  # Moderate volatility
+            if len(atr_values) > 0:
+                # Score based on ATR stability, not absolute value
+                if len(atr_values) >= 20:
+                    atr_std = atr_values.tail(20).std()
+                    atr_mean = atr_values.tail(20).mean()
+
+                    if atr_mean > 0:
+                        atr_stability = 1 - min(atr_std / atr_mean, 1)  # 0-1 score
+                        score += int(atr_stability * 20)  # Stable ATR = predictable
+                    else:
+                        score += 10  # Default moderate score
+                else:
+                    score += 10  # Insufficient data for stability calculation
 
             # 4. Pattern clarity (0-30 points)
             # Clean sweep = immediate reversal
@@ -538,7 +605,8 @@ class LiquiditySweepStrategy(BaseStrategy):
                 elif body_wick_ratio < 0.5:
                     score += 5   # Moderate rejection
 
-        except Exception:
+        except (KeyError, IndexError, ValueError) as e:
+            logger.warning(f"Confidence calculation failed at index {signal_idx}: {e}")
             return 50  # Default on error
 
         return min(score, 100)
