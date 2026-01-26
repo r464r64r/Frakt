@@ -210,6 +210,45 @@ class BaseStrategy(ABC):
         """
         return [s for s in signals if s.confidence >= min_confidence]
 
+    def filter_signals_by_recency(
+        self, signals: list[Signal], data: pd.DataFrame, lookback_candles: int = 5
+    ) -> list[Signal]:
+        """
+        Filter signals to only recent ones (for live trading).
+
+        This method is useful for live bots that only want to trade fresh signals
+        from the most recent bars. It should NOT be used in backtests, where you
+        want to evaluate all historical signals.
+
+        ARCHITECTURE NOTE: This filtering was moved out of individual strategies
+        (see Issue #46) to maintain separation of concerns:
+        - Strategies implement BUSINESS LOGIC (signal generation rules)
+        - Callers implement PRESENTATION LOGIC (which signals to display/trade)
+
+        Args:
+            signals: List of signals to filter
+            data: Full OHLCV DataFrame used to generate signals
+            lookback_candles: Only return signals from last N candles (default: 5)
+
+        Returns:
+            Filtered list of signals from recent candles only
+
+        Example:
+            >>> # In live bot (only trade fresh signals):
+            >>> all_signals = strategy.generate_signals(data)
+            >>> fresh_signals = strategy.filter_signals_by_recency(all_signals, data, lookback_candles=5)
+            >>>
+            >>> # In backtest (evaluate all historical signals):
+            >>> all_signals = strategy.generate_signals(data)  # Don't filter!
+        """
+        if not signals or len(data) < lookback_candles:
+            return signals
+
+        cutoff_time = data.index[-lookback_candles]
+        recent = [s for s in signals if s.timestamp >= cutoff_time]
+
+        return recent
+
     def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> pd.Series:
         """
         Calculate Average True Range.

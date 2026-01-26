@@ -48,7 +48,6 @@ class LiquiditySweepStrategy(BaseStrategy):
         "tolerance": 0.001,  # Tolerance for equal level detection
         "atr_period": 14,  # ATR period for volatility
         "atr_stop_buffer": 0.5,  # ATR multiplier for stop loss buffer
-        "signal_lookback_candles": 5,  # Only return signals from last N candles (forward-looking)
         # Multi-TF confidence bonuses (ADR 0.04.0014)
         "htf_trend_bonus": 20,  # Bonus for HTF trend alignment
         "mtf_structure_bonus": 10,  # Bonus for MTF structure confirmation
@@ -126,26 +125,10 @@ class LiquiditySweepStrategy(BaseStrategy):
         # 6. Filter by RR ratio
         signals = self.filter_signals_by_rr(signals, self.params["min_rr_ratio"])
 
-        # 7. Filter by recency (forward-looking: only return FRESH signals)
-        if signals:
-            total_signals = len(signals)
-            lookback = self.params["signal_lookback_candles"]
-
-            # Calculate cutoff timestamp (N candles ago from latest data)
-            if len(data) >= lookback:
-                cutoff_idx = -lookback
-                cutoff_time = data.index[cutoff_idx]
-
-                # Keep only signals from last N candles
-                recent_signals = [s for s in signals if s.timestamp >= cutoff_time]
-
-                if recent_signals != signals:
-                    logger.info(
-                        f"Filtered {total_signals} historical signals → "
-                        f"{len(recent_signals)} RECENT (last {lookback} candles)"
-                    )
-
-                signals = recent_signals
+        # 7. Return ALL signals (no recency filter)
+        # NOTE: Recency filtering moved to BaseStrategy.filter_signals_by_recency()
+        # Caller (live bot) can apply it externally if needed
+        # Backtests get all historical signals (correct behavior)
 
         if signals:
             logger.info(
